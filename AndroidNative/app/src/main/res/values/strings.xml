@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AppRestMobile</string>
+    
+    <!-- Initial Config -->
+    <string name="initial_config_title">Configuración Inicial</string>
+    <string name="server_ip_label">Dirección IP del servidor</string>
+    <string name="server_ip_hint">192.168.1.1 o 192.168.1.1:83</string>
+    <string name="continue_button">Continuar</string>
+    <string name="confirm_button">Confirmar</string>
+    <string name="select_brand">Seleccione una marca</string>
+    <string name="select_store">Seleccione una tienda</string>
+    <string name="select_pos">Seleccione una caja</string>
+    <string name="loading">Cargando...</string>
+    
+    <!-- Sync Data -->
+    <string name="syncing_data">Sincronizando datos...</string>
+    <string name="syncing_company">Sincronizando información de la empresa...</string>
+    <string name="syncing_store">Sincronizando información de la tienda...</string>
+    <string name="syncing_pos">Sincronizando información del punto de venta...</string>
+    <string name="syncing_products">Sincronizando productos...</string>
+    <string name="syncing_promotions">Sincronizando promociones...</string>
+    <string name="syncing_banners">Sincronizando banners promocionales...</string>
+    <string name="loading_images">Cargando imágenes en caché...</string>
+    <string name="sync_complete">Datos sincronizados</string>
+    
+    <!-- Language Selection -->
+    <string name="language_title">SELECCIONÁ TU IDIOMA</string>
+    <string name="language_spanish">ESPAÑOL</string>
+    <string name="language_english">ENGLISH</string>
+    
+    <!-- Table Config -->
+    <string name="table_config_title">Configure su mesa</string>
+    <string name="select_room">Selecciona una Sala:</string>
+    <string name="select_table">Selecciona una Mesa:</string>
+    <string name="number_of_diners">Ingrese el número de comensales:</string>
+    <string name="diners_hint">Número de comensales (1-20)</string>
+    <string name="back_button">Atrás</string>
+    <string name="configure_existing_order">Configurar orden existente con ID</string>
+    <string name="order_id_label">ID de Orden:</string>
+    <string name="order_id_hint">Ingrese ID de orden</string>
+    <string name="configure_button">Configurar</string>
+    <string name="creating_order">Creando orden...</string>
+    <string name="configuring_order">Configurando...</string>
+    
+    <!-- Errors -->
+    <string name="error_invalid_ip">Dirección IP inválida</string>
+    <string name="error_network">Error de red. Verifique su conexión.</string>
+    <string name="error_server">Error del servidor. Intente nuevamente.</string>
+    <string name="error_select_room">Por favor seleccione una sala</string>
+    <string name="error_select_table">Por favor seleccione una mesa</string>
+    <string name="error_enter_diners">Por favor ingrese el número de comensales</string>
+</resources>
