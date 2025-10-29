@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">AR - Self Service App</string>
+    <string name="device_admin_label">AR Kiosk Device Admin</string>
+    <string name="device_admin_description">Administrador de dispositivo para modo kiosk. Permite bloquear configuraciones del sistema, WiFi, Bluetooth y otras funciones críticas para mantener el dispositivo en modo kiosk seguro.</string>
+</resources>

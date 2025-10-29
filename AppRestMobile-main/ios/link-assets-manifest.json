@@ -1,0 +1,53 @@
+{
+  "migIndex": 1,
+  "data": [
+    {
+      "path": "src/assets/fonts/DunkinSans.otf",
+      "sha1": "8206bc13067abc8d8a68f85b2410bab89a25b891"
+    },
+    {
+      "path": "src/assets/fonts/DunkinSansExtra.otf",
+      "sha1": "bc6f40e057c630612af77bd528c8dce2bde2061a"
+    },
+    {
+      "path": "src/assets/fonts/DunkinSansLite.otf",
+      "sha1": "024bd3b411864f847cd94611b726acbc042910e9"
+    },
+    {
+      "path": "src/assets/fonts/Dunkin_Sans.ttf",
+      "sha1": "0a2e39188fd43fd69fecb11ce5e632705faa2bf6"
+    },
+    {
+      "path": "src/assets/fonts/Dunkin_Sans_Bold.otf",
+      "sha1": "3778c140fca48df9e08a1f24ac301ea9fec8e488"
+    },
+    {
+      "path": "src/assets/fonts/Dunkin_Sans_Bold_Italic.otf",
+      "sha1": "3fd867e3d33b3672df2b0a3dad90c7208ab4e2f7"
+    },
+    {
+      "path": "src/assets/fonts/Dunkin_Sans_Italic.otf",
+      "sha1": "5f40bf73ea5184f0fe40adc2f4e570df3c7293e0"
+    },
+    {
+      "path": "src/assets/fonts/MerloBold.otf",
+      "sha1": "aef2127deed9b7839a61ed22fecb634892a67894"
+    },
+    {
+      "path": "src/assets/fonts/MerloLight.otf",
+      "sha1": "593eec0cbcd7b908eb0c76c6d21af5a1ad8cb111"
+    },
+    {
+      "path": "src/assets/fonts/MerloRegular.otf",
+      "sha1": "246e66b6ba995a59cce902ab11448346d18d9c75"
+    },
+    {
+      "path": "src/assets/fonts/MerloSemiBold.otf",
+      "sha1": "c5c8d53acbb08fdcc55350cdf3e7dccf2bc55483"
+    },
+    {
+      "path": "src/assets/fonts/Montserrat-Regular.ttf",
+      "sha1": "bb895d19b8a1fbe1c57fc89cac5da82fdc8fdef4"
+    }
+  ]
+}
