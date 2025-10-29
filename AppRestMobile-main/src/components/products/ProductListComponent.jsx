@@ -1,0 +1,874 @@
+import React, {useMemo, useCallback, useRef, useState, useEffect} from 'react';
+import {FlatList, StyleSheet, Text, View, ScrollView, InteractionManager, Image} from 'react-native';
+import MenuListComponentSmall from './MenuListComponentSmall';
+import FastImage from 'react-native-fast-image';
+
+import {useSelector} from 'react-redux';
+import {useTheme} from '../../providers/ThemeProvider';
+import ProductCard from './ProductCard';
+import {useTranslation} from 'react-i18next';
+import useImagePreloader from '../../hooks/config/useImagePreloader';
+import ProductService from '../../services/api/ProductService';
+// import {setCurrentView} from '../../redux/slice/settingsSlice';
+
+// Componente separado para renderizar cada familia
+const FamilySection = React.memo(
+  ({family, language, goToProductDetail, isBagBlocked, styles}) => {
+    const familyLabel =
+      language === 'en'
+        ? family.description_en || family.description_es || ''
+        : family.description_es || family.description_en || '';
+
+    // Usar map simple en lugar de FlatList anidado para mejor rendimiento
+    const renderProducts = useMemo(() => {
+      if (!family.products || family.products.length === 0) {
+        return null;
+      }
+
+      return family.products.map((product, index) => {
+        if (!product || !product.id) {
+          return null;
+        }
+
+        return (
+          <ProductCard
+            key={`${product.id}-${index}`}
+            product={product}
+            language={language}
+            onPress={goToProductDetail}
+            isBagBlocked={isBagBlocked}
+          />
+        );
+      });
+    }, [family.products, language, goToProductDetail, isBagBlocked]);
+
+    return (
+      <View style={styles.familyContainer}>
+        {familyLabel !== '' && (
+          <View style={styles.familyHeader}>
+            <Text style={styles.familyLabel}>{familyLabel}</Text>
+          </View>
+        )}
+
+        <View style={styles.productRow}>{renderProducts}</View>
+      </View>
+    );
+  },
+  // 🚀 OPTIMIZACIÓN: Comparador personalizado para FamilySection
+  (prevProps, nextProps) => {
+    return (
+      prevProps.family === nextProps.family &&
+      prevProps.language === nextProps.language &&
+      prevProps.isBagBlocked === nextProps.isBagBlocked &&
+      prevProps.goToProductDetail === nextProps.goToProductDetail &&
+      prevProps.styles === nextProps.styles
+    );
+  }
+);
+
+FamilySection.displayName = 'FamilySection';
+
+// 🆕 Configuración para onViewableItemsChanged - FUERA del componente para estabilidad
+const VIEWABILITY_CONFIG = {
+  itemVisiblePercentThreshold: 30, // Item visible si al menos 30% está en pantalla
+  waitForInteraction: false,
+};
+
+const ProductListComponent = ({
+  products,
+  navigation,
+  setProductsFilterList,
+  selectedItem,
+  setSelectedItem,
+  isBagBlocked,
+  onScrollToSection, // 🆕 Callback para exponer la función de scroll
+  triggerScrollToSection, // 🆕 Función para hacer scroll (recibida del parent)
+  isReturningFromDetail, // 🆕 Flag para saber si regresamos del detalle
+}) => {
+  // 🔍 DEBUG: Contador de renders para performance
+  // DEBUG LOGGING DISABLED FOR PERFORMANCE
+  // Selectores optimizados con comparadores de igualdad
+  const language = useSelector(state => state.settings.language);
+  const {commonStyles, colors, dimensions, font_type} = useTheme();
+
+  const {t} = useTranslation();
+
+  // 🆕 Refs para scroll y posiciones de secciones
+  const scrollViewRef = useRef(null);
+  const sectionRefs = useRef({});
+  const sectionLayouts = useRef({});
+  
+  // 🆕 Estado para controlar si el scroll es programático
+  const isScrollingProgrammatically = useRef(false);
+  
+  // 🆕 Flag para indicar que la actualización viene del spy scroll (no del usuario)
+  const isUpdatingFromSpyScroll = useRef(false);
+  
+  // 🆕 Ref para trackear el selectedItem anterior
+  const previousSelectedItem = useRef(null);
+  
+  // 🆕 Ref para rastrear la posición de scroll actual continuamente
+  const currentScrollPosition = useRef(0);
+  
+  // 🆕 Ref para rastrear el último selectedItem que vino del menú principal
+  const lastSelectedFromMenu = useRef(null);
+  
+  // 🆕 Ref para almacenar el último sectionId solicitado
+  const pendingScrollId = useRef(null);
+  
+  // 🆕 Ref para detectar si necesitamos esperar render
+  const needsRenderWait = useRef(true);
+  
+  // 🔥 OPTIMIZACIÓN: Desabilitar eventos pesados durante montaje inicial
+  const [isInitialMount, setIsInitialMount] = useState(true);
+  
+  // � Ref para comparar menús y evitar updates innecesarios
+  const prevMenusRef = useRef([]);
+  
+  // �🆕 Obtener todos los menús/secciones del servicio
+  const [allMenus, setAllMenus] = useState(() => {
+    // 🆕 Inicializar con los datos existentes en ProductService para evitar pantalla vacía
+    const initialMenus = ProductService.getMenus();
+    prevMenusRef.current = initialMenus;
+    return initialMenus;
+  });
+  
+  useEffect(() => {
+    // Suscribirse a cambios en menús
+    const unsubscribe = ProductService.subscribe(() => {
+      const menus = ProductService.getMenus();
+      
+      // ✨ OPTIMIZACIÓN: Solo actualizar si los menús realmente cambiaron
+      if (menus.length !== prevMenusRef.current.length || 
+          menus.some((menu, i) => menu.id !== prevMenusRef.current[i]?.id)) {
+        setAllMenus(menus);
+        prevMenusRef.current = menus;
+      }
+    });
+    
+    // Verificar si necesitamos obtener datos iniciales
+    if (allMenus.length === 0) {
+      const initialMenus = ProductService.getMenus();
+      if (initialMenus.length > 0) {
+        setAllMenus(initialMenus);
+        prevMenusRef.current = initialMenus;
+      }
+    }
+    
+    return () => unsubscribe();
+  }, []); // Dependencias vacías - solo ejecutar al montar
+  
+  // 🔥 OPTIMIZACIÓN: Permitir eventos después del montaje inicial
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsInitialMount(false);
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
+  
+  // 🆕 Hacer scroll INMEDIATAMENTE cuando selectedItem cambia
+  useEffect(() => {
+    //     console.log('🔍 [ProductListComponent] useEffect disparado', {
+    //   selectedItem,
+    //   previousSelectedItem: previousSelectedItem.current,
+    //   hasScrollViewRef: !!scrollViewRef.current,
+    //   sectionsCount: sectionsWithFamilies?.length || 0,
+    //   needsRenderWait: needsRenderWait.current,
+    //   isFromSpyScroll: isUpdatingFromSpyScroll.current
+    // });
+    
+    // Si el cambio viene del spy scroll, NO hacer scroll programático
+    if (isUpdatingFromSpyScroll.current) {
+      // console.log('⏭️ Cambio viene del spy scroll - ignorando scroll programático');
+      // Actualizar previousSelectedItem para mantener el tracking correcto
+      previousSelectedItem.current = selectedItem;
+      // NO resetear el flag aquí - se resetea en el setTimeout del spy scroll
+      return;
+    }
+    
+    // Si selectedItem NO cambió (es igual al anterior), no hacer scroll
+    if (selectedItem == previousSelectedItem.current) {
+      // console.log('⏭️ selectedItem no cambió - no hacer scroll');
+      return;
+    }
+    
+    // Actualizar el valor anterior
+    previousSelectedItem.current = selectedItem;
+    
+    if (!selectedItem) {
+      // console.log('⏭️ No hay selectedItem');
+      return;
+    }
+    if (!sectionsWithFamilies || sectionsWithFamilies.length === 0) {
+      // console.log('⏭️ No hay sectionsWithFamilies');
+      return;
+    }
+    
+    //     console.log('🎯 [ProductListComponent] selectedItem cambió a:', selectedItem, 'tipo:', typeof selectedItem);
+    
+    const sectionIndex = sectionsWithFamilies.findIndex(
+      item => item.section.id == selectedItem // Usar == para comparación flexible (permite string == number)
+    );
+    
+    if (sectionIndex === -1) {
+      // console.log('❌ Sección no encontrada en sectionsWithFamilies. IDs disponibles:', 
+      //   sectionsWithFamilies.map(s => `${s.section.id} (${typeof s.section.id})`).join(', ')
+      // );
+      return;
+    }
+    
+    // 🚀 PRECARGAR IMÁGENES de la sección seleccionada y las siguientes
+    const preloadSectionImages = () => {
+      const currentSection = sectionsWithFamilies[sectionIndex];
+      const nextSection = sectionsWithFamilies[sectionIndex + 1];
+      
+      const imagesToPreload = [];
+      
+      // Recopilar imágenes de la sección actual
+      if (currentSection?.families) {
+        currentSection.families.forEach(family => {
+          if (family.products) {
+            family.products.forEach(product => {
+              if (product.image_url) {
+                imagesToPreload.push(product.image_url);
+              }
+            });
+          }
+        });
+      }
+      
+      // Recopilar imágenes de la siguiente sección (anticipación)
+      if (nextSection?.families) {
+        nextSection.families.forEach(family => {
+          if (family.products) {
+            family.products.forEach(product => {
+              if (product.image_url) {
+                imagesToPreload.push(product.image_url);
+              }
+            });
+          }
+        });
+      }
+      
+      // Precargar imágenes locales usando Image.prefetch (más eficiente que FastImage)
+      if (imagesToPreload.length > 0) {
+        console.log(`🔥 [ProductListComponent] Precargando ${imagesToPreload.length} imágenes de sección ${selectedItem}`);
+        
+        imagesToPreload.forEach(url => {
+          if (url?.startsWith('file://')) {
+            // Para imágenes locales, usar Image.prefetch (es instantáneo)
+            Image.prefetch(url).catch(() => {
+              // Silenciosamente ignorar errores de prefetch
+            });
+          }
+        });
+      }
+    };
+    
+    // Ejecutar precarga en InteractionManager para no bloquear UI
+    InteractionManager.runAfterInteractions(() => {
+      preloadSectionImages();
+    });
+    
+    // console.log('✅ Preparando scroll a índice:', sectionIndex);
+    
+    const executeScroll = () => {
+      if (!scrollViewRef.current) {
+        return;
+      }
+      
+      isScrollingProgrammatically.current = true;
+      
+      // Usar scrollTo con layout guardado (ScrollView)
+      const layout = sectionLayouts.current[selectedItem];
+      if (layout && layout.y !== undefined) {
+        scrollViewRef.current.scrollTo({
+          y: Math.max(0, layout.y - 30),
+          animated: true,
+        });
+      }
+      
+      // Resetear flag después de la animación
+      setTimeout(() => {
+        isScrollingProgrammatically.current = false;
+      }, 800);
+    };
+    
+    // Si el ScrollView acaba de montarse, esperar mínimo para que renderice layouts
+    if (needsRenderWait.current) {
+      // console.log('🔄 Esperando render del ScrollView - 100ms');
+      
+      // Delay de 100ms para dar tiempo a que el FlatList renderice los layouts
+      setTimeout(() => {
+        needsRenderWait.current = false;
+        // console.log('🎬 Ejecutando scroll después del delay');
+        executeScroll();
+      }, 100);
+    } else {
+      // Para navegación subsecuente (barra superior), ejecutar inmediatamente
+      // console.log('🚀 Navegación subsecuente - scroll inmediato');
+      executeScroll();
+    }
+  }, [selectedItem, sectionsWithFamilies]);
+  
+  // 🆕 Ya no necesitamos resetear needsRenderWait en unmount porque el componente
+  // permanece montado, solo se oculta con display:none
+  
+  // Registrar función simple para barra superior
+  useEffect(() => {
+    if (onScrollToSection) {
+      onScrollToSection((sectionId) => {
+        // console.log('📞 Llamada directa para:', sectionId);
+        if (setSelectedItem) {
+          setSelectedItem(sectionId);
+        }
+      });
+    }
+  }, [onScrollToSection, setSelectedItem]);
+  
+  // 🆕 Detectar items visibles - MÉTODO CORRECTO para FlatList
+  const onViewableItemsChanged = useCallback(({viewableItems}) => {
+    // console.log('👁️ [Viewable] Callback ejecutado, items visibles:', viewableItems?.length || 0);
+    
+    // Si es scroll programático, ignorar
+    if (isScrollingProgrammatically.current) {
+      // console.log('⏭️ [Viewable] Ignorando - scroll programático activo');
+      return;
+    }
+    
+    // Si no hay items visibles, ignorar
+    if (!viewableItems || viewableItems.length === 0) {
+      // console.log('⚠️ [Viewable] No hay items visibles');
+      return;
+    }
+    
+    // 🚀 PRECARGAR imágenes de items visibles y próximos
+    InteractionManager.runAfterInteractions(() => {
+      const imagesToPreload = [];
+      
+      // Recopilar imágenes de items visibles y próximos (hasta 3 items adelante)
+      const itemsToPreload = viewableItems.slice(0, 4);
+      
+      itemsToPreload.forEach(viewableItem => {
+        if (viewableItem.item?.families) {
+          viewableItem.item.families.forEach(family => {
+            if (family.products) {
+              family.products.forEach(product => {
+                if (product.image_url) {
+                  imagesToPreload.push(product.image_url);
+                }
+              });
+            }
+          });
+        }
+      });
+      
+      // Precargar imágenes locales
+      if (imagesToPreload.length > 0) {
+        imagesToPreload.forEach(url => {
+          if (url?.startsWith('file://')) {
+            Image.prefetch(url).catch(() => {});
+          }
+        });
+      }
+    });
+    
+    // Obtener la primera sección visible (la que está más arriba)
+    const firstVisibleItem = viewableItems[0];
+    // console.log('🔍 [Viewable] Primer item:', firstVisibleItem?.item?.section?.id);
+    
+    if (firstVisibleItem && firstVisibleItem.item) {
+      const visibleSectionId = firstVisibleItem.item.section.id;
+      
+      // console.log('👁️ [Viewable] Primera sección visible:', visibleSectionId, 'selectedItem actual:', selectedItem);
+      
+      // Si la sección visible es diferente a la seleccionada, actualizar
+      if (visibleSectionId != selectedItem) {
+        // console.log('🎯 [Viewable] CAMBIO DETECTADO - Actualizando selectedItem');
+        
+        // Establecer flag
+        isUpdatingFromSpyScroll.current = true;
+        
+        // Actualizar selectedItem
+        if (setSelectedItem) {
+          setSelectedItem(visibleSectionId);
+        }
+        
+        // Resetear flag
+        setTimeout(() => {
+          isUpdatingFromSpyScroll.current = false;
+        }, 100);
+      }
+    }
+  }, [selectedItem, setSelectedItem]);
+
+  // Precargar imágenes de productos usando el hook personalizado
+  // 🆕 Ahora precarga imágenes de TODOS los productos de todas las secciones
+  const allProducts = useMemo(() => {
+    return allMenus.flatMap(menu => menu.products || []);
+  }, [allMenus]);
+  
+  useImagePreloader(allProducts);
+
+  // Nota: evitar fijar currentView aquí; debe manejarlo el contenedor.
+
+  // Memoizar estilos para evitar recreación
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        ...commonStyles,
+        container: {
+          flex: 1,
+          backgroundColor: '#fff',
+          paddingHorizontal: 10,
+          paddingTop: 10,
+        },
+        listContainer: {
+          paddingBottom: dimensions.height * 0.07,
+          marginTop: 25,
+        },
+        sectionHeader: {
+          width: '100%',
+          alignItems: 'center',
+          marginTop: 30,
+          marginBottom: 20,
+          paddingHorizontal: 20,
+        },
+        sectionTitle: {
+          fontSize: dimensions.width * 0.020,
+          fontFamily: font_type.bold,
+          color: colors.primary,
+          textTransform: 'uppercase',
+          textAlign: 'center',
+          letterSpacing: 1,
+        },
+        familyContainer: {
+          marginBottom: 20,
+          marginHorizontal: 15,
+        },
+        familyHeader: {
+          width: '100%',
+          alignItems: 'center',
+          marginBottom: 20,
+        },
+        familyLabel: {
+          fontSize: dimensions.width * 0.015,
+          fontFamily: font_type.semibold,
+          color: colors.secondary,
+          textTransform: 'uppercase',
+          textAlign: 'center',
+        },
+        productRow: {
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          justifyContent: 'center',
+          gap: 13,
+          paddingHorizontal: 10,
+        },
+        separator: {
+          height: 1,
+          backgroundColor: '#ccc',
+          width: '100%',
+          marginTop: 5,
+        },
+        emptyContainer: {
+          flex: 1,
+          justifyContent: 'center',
+          alignItems: 'center',
+          paddingBottom: 70,
+        },
+        emptyText: {
+          fontSize: dimensions.width * 0.018,
+          fontFamily: font_type.regular,
+          color: colors.textSecondary || '#666',
+          textAlign: 'center',
+          marginBottom: 10,
+        },
+        emptySubText: {
+          fontSize: dimensions.width * 0.014,
+          fontFamily: font_type.lite,
+          color: colors.textSecondary || '#999',
+          textAlign: 'center',
+          paddingHorizontal: 20,
+        },
+      }),
+    [commonStyles, colors, dimensions, font_type],
+  );
+
+  const goToProductDetail = useCallback(
+    product => {
+      if (!navigation) {
+        console.error('❌ [ProductListComponent] Navigation is undefined');
+        return;
+      }
+      
+      // 🚀 OPTIMIZACIÓN: Usar InteractionManager para navegación más fluida
+      InteractionManager.runAfterInteractions(() => {
+        // Pasar producto completo para renderizado inmediato
+        navigation.navigate('ProductDetail', {
+          product: product,
+          productSku: product.sku, // Mantener SKU como fallback
+          isRecomendation: false
+        });
+      });
+    },
+    [navigation],
+  );
+
+  // 🆕 Memoizar el procesamiento de TODAS las secciones con sus familias
+  const sectionsWithFamilies = useMemo(() => {
+    if (!allMenus || allMenus.length === 0) {
+      return [];
+    }
+
+    return allMenus.map(menu => {
+      const menuProducts = menu.products || [];
+      
+      if (menuProducts.length === 0) {
+        return null;
+      }
+
+      // Agrupar productos por familias dentro de esta sección
+      const familiesMap = new Map();
+
+      menuProducts.forEach(product => {
+        if (!product || !product.id) {
+          return;
+        }
+
+        let familyId;
+        let productFamily;
+
+        if (product.family && product.family.id) {
+          familyId = product.family.id;
+          productFamily = product.family;
+        } else {
+          familyId = 'sin-familia';
+          productFamily = {
+            id: 'sin-familia',
+            description_es: '',
+            description_en: '',
+            order: 999,
+          };
+        }
+
+        if (!familiesMap.has(familyId)) {
+          familiesMap.set(familyId, {
+            ...productFamily,
+            products: [],
+          });
+        }
+        familiesMap.get(familyId).products.push(product);
+      });
+
+      const familiesArray = Array.from(familiesMap.values());
+
+      // Filtrar familias vacías
+      const validFamilies = familiesArray.filter(
+        family =>
+          family && family.id && family.products && family.products.length > 0,
+      );
+
+      // Ordenar productos dentro de cada familia
+      validFamilies.forEach(family => {
+        family.products.sort((a, b) => {
+          const aHasTags = a.tags && a.tags.length > 0;
+          const bHasTags = b.tags && b.tags.length > 0;
+
+          if (aHasTags && !bHasTags) {
+            return -1;
+          }
+          if (!aHasTags && bHasTags) {
+            return 1;
+          }
+
+          return a.id - b.id;
+        });
+      });
+
+      // Ordenar familias por order
+      const sortedFamilies = validFamilies.sort((a, b) => {
+        const aOrder = a.order !== undefined ? a.order : 999;
+        const bOrder = b.order !== undefined ? b.order : 999;
+        return aOrder - bOrder;
+      });
+
+      return {
+        section: menu,
+        families: sortedFamilies,
+      };
+    }).filter(Boolean); // Remover secciones nulas
+  }, [allMenus]);
+
+  // Memoizar el procesamiento de familias (solo para la sección filtrada, si aplica)
+  const families = useMemo(() => {
+    if (!products || products.length === 0) {
+      return [];
+    }
+
+    const familiesMap = new Map();
+
+    // Usar Map para mejor rendimiento en lugar de array.find
+    products.forEach(product => {
+      // Solo validar que el producto existe y tiene ID
+      if (!product || !product.id) {
+        return;
+      }
+
+      let familyId;
+      let productFamily;
+
+      // Si tiene familia válida con ID, usarla
+      if (product.family && product.family.id) {
+        familyId = product.family.id;
+        productFamily = product.family;
+      } else {
+        // Si no tiene familia válida o family está vacío, crear una familia genérica
+        familyId = 'sin-familia';
+        productFamily = {
+          id: 'sin-familia',
+          description_es: '',
+          description_en: '',
+          order: 999,
+        };
+      }
+
+      if (!familiesMap.has(familyId)) {
+        familiesMap.set(familyId, {
+          ...productFamily,
+          products: [],
+        });
+      }
+      familiesMap.get(familyId).products.push(product);
+    });
+
+    const familiesArray = Array.from(familiesMap.values());
+
+    // Filtrar familias vacías y validar estructura
+    const validFamilies = familiesArray.filter(
+      family =>
+        family && family.id && family.products && family.products.length > 0,
+    );
+
+    // Ordenar productos dentro de cada familia: primero los que tienen tags
+    validFamilies.forEach(family => {
+      family.products.sort((a, b) => {
+        const aHasTags = a.tags && a.tags.length > 0;
+        const bHasTags = b.tags && b.tags.length > 0;
+
+        // Si uno tiene tags y el otro no, el que tiene tags va primero
+        if (aHasTags && !bHasTags) {
+          return -1;
+        }
+        if (!aHasTags && bHasTags) {
+          return 1;
+        }
+
+        // Si ambos tienen o no tienen tags, mantener orden original (por ID)
+        return a.id - b.id;
+      });
+    });
+
+    // console.log('Familias válidas:', validFamilies);
+
+    // Ordenar familias únicamente por order
+    return validFamilies.sort((a, b) => {
+      const aOrder = a.order !== undefined ? a.order : 999;
+      const bOrder = b.order !== undefined ? b.order : 999;
+      return aOrder - bOrder;
+    });
+  }, [products]);
+
+  // Renderizar cada familia
+  const renderFamily = useCallback(
+    ({item: family}) => {
+      // Validar que la familia existe y tiene productos
+      if (
+        !family ||
+        !family.id ||
+        !family.products ||
+        family.products.length === 0
+      ) {
+        return null;
+      }
+
+      return (
+        <FamilySection
+          family={family}
+          language={language}
+          goToProductDetail={goToProductDetail}
+          isBagBlocked={isBagBlocked}
+          styles={styles}
+        />
+      );
+    },
+    [language, goToProductDetail, isBagBlocked, styles],
+  );
+
+  const getItemLayout = useCallback((data, index) => {
+    const ESTIMATED_ITEM_HEIGHT = 300; // altura estimada de cada familia
+    return {
+      length: ESTIMATED_ITEM_HEIGHT,
+      offset: ESTIMATED_ITEM_HEIGHT * index,
+      index,
+    };
+  }, []);
+
+  return (
+    <View style={styles.container}>
+      <MenuListComponentSmall
+        setProductsFilterList={setProductsFilterList}
+        selectedItem={selectedItem}
+        setSelectedItem={setSelectedItem}
+        isBagBlocked={isBagBlocked}
+        triggerScrollToSection={triggerScrollToSection}
+        isUpdatingFromSpyScroll={isUpdatingFromSpyScroll}
+      />
+
+      <View style={styles.separator} />
+
+      {sectionsWithFamilies.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>{t('no_products_available')}</Text>
+          <Text style={styles.emptySubText}>
+            {t('products_will_be_available')}
+          </Text>
+        </View>
+      ) : (
+        <ScrollView
+          ref={scrollViewRef}
+          showsVerticalScrollIndicator={true}
+          contentContainerStyle={styles.listContainer}
+          onScroll={(event) => {
+            // 🚀 Scroll spy siempre activo
+            if (isScrollingProgrammatically.current) return;
+            
+            const scrollY = event.nativeEvent.contentOffset.y;
+            
+            // Verificar que tenemos layouts
+            if (Object.keys(sectionLayouts.current).length === 0) return;
+            
+            // 🚀 OPTIMIZADO: Encontrar sección más cercana al top (con offset)
+            let closestSection = null;
+            let minDistance = Infinity;
+            
+            Object.entries(sectionLayouts.current).forEach(([sectionId, layout]) => {
+              const distance = Math.abs((layout.y - 50) - scrollY);
+              if (distance < minDistance) {
+                minDistance = distance;
+                closestSection = sectionId;
+              }
+            });
+            
+            // Solo cambiar si distancia < 300px (evitar rebotes)
+            if (closestSection && closestSection != selectedItem && minDistance < 300) {
+              console.log(`✅ [ScrollSpy] ${selectedItem} -> ${closestSection}`);
+              isUpdatingFromSpyScroll.current = true;
+              if (setSelectedItem) {
+                setSelectedItem(closestSection);
+              }
+              setTimeout(() => {
+                isUpdatingFromSpyScroll.current = false;
+              }, 200);
+            }
+          }}
+          scrollEventThrottle={200}
+        >
+          {sectionsWithFamilies.map((sectionData, sectionIndex) => {
+            const sectionName = language === 'en' && sectionData.section.name_en
+              ? sectionData.section.name_en
+              : sectionData.section.name_es;
+            
+            return (
+              <View
+                key={sectionData.section.id}
+                ref={(ref) => {
+                  if (ref) {
+                    sectionRefs.current[sectionData.section.id] = ref;
+                  }
+                }}
+                onLayout={(event) => {
+                  const layout = event.nativeEvent.layout;
+                  sectionLayouts.current[sectionData.section.id] = {
+                    x: layout.x,
+                    y: layout.y,
+                    width: layout.width,
+                    height: layout.height
+                  };
+                }}
+              >
+                {/* Título de la sección */}
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>
+                    {sectionName.toUpperCase()}
+                  </Text>
+                </View>
+
+                {/* Familias de esta sección */}
+                {sectionData.families.map((family, familyIndex) => {
+                  const familyLabel =
+                    language === 'en'
+                      ? family.description_en || family.description_es || ''
+                      : family.description_es || family.description_en || '';
+
+                  return (
+                    <View key={family.id} style={styles.familyContainer}>
+                      {familyLabel !== '' && (
+                        <View style={styles.familyHeader}>
+                          <Text style={styles.familyLabel}>{familyLabel}</Text>
+                        </View>
+                      )}
+
+                      <View style={styles.productRow}>
+                        {family.products.map((product, productIndex) => {
+                          if (!product || !product.id) {
+                            return null;
+                          }
+
+                          return (
+                            <ProductCard
+                              key={`${product.id}-${productIndex}`}
+                              product={product}
+                              language={language}
+                              onPress={goToProductDetail}
+                              isBagBlocked={isBagBlocked}
+                            />
+                          );
+                        })}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            );
+          })}
+        </ScrollView>
+      )}
+    </View>
+  );
+};
+
+// 🚀 OPTIMIZACIÓN CRÍTICA: Comparador personalizado para evitar re-renders innecesarios
+export default React.memo(ProductListComponent, (prevProps, nextProps) => {
+  // Comparar TODAS las props para encontrar la que está cambiando
+  const allProps = Object.keys(nextProps);
+  const changedProps = [];
+  
+  for (const prop of allProps) {
+    if (prevProps[prop] !== nextProps[prop]) {
+      // Funciones y navigation son esperadas, ignorar
+      if (typeof nextProps[prop] === 'function' || prop === 'navigation') {
+        continue;
+      }
+      changedProps.push(prop);
+    }
+  }
+  
+  if (changedProps.length > 0) {
+    //     console.log(`[ProductListComponent.memo] ❌ Re-rendering - Props changed:`, changedProps);
+    return false; // Re-renderizar
+  }
+  
+  //   console.log(`[ProductListComponent.memo] ✅ Skip render - props no cambiaron`);
+  return true; // NO re-renderizar
+});

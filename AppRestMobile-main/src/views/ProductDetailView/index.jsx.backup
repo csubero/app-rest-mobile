@@ -1,0 +1,1540 @@
+/* eslint-disable react-hooks/exhaustive-deps */
+import React, {useEffect, useState, useMemo, useCallback} from 'react';
+import {
+  Image,
+  Text,
+  View,
+  ScrollView,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  ActivityIndicator,
+} from 'react-native';
+import Utils from '../../helpers/utils/Utils';
+import ProductQuantityPicker from '../../components/products/ProductQuantityPicker';
+import ModifierQuantityPicker from '../../components/products/ModifierQuantityPicker';
+import TakeAwaySwitch from '../../components/general/TakeAwaySwitch';
+import OptimizedImage from '../../components/products/OptimizedImage';
+import {useTranslation} from 'react-i18next';
+import {useDispatch, useSelector} from 'react-redux';
+import {addProduct, updateProductByIndex} from '../../redux/slice/bagSlice';
+
+import {useTheme} from '../../providers/ThemeProvider';
+import createStyles from './styles';
+
+// Componente memoizado para la información básica del producto
+const ProductBasicInfo = React.memo(({ 
+  imageUrl, 
+  productName, 
+  productDescription, 
+  product, 
+  fromText, 
+  isTakeAway, 
+  setIsTakeAway, 
+  quantity, 
+  setQuantity, 
+  isAddingToCart,
+  styles,
+  colors,
+  font_type,
+  dimensions
+}) => (
+  <ScrollView
+    contentContainerStyle={{
+      paddingBottom: 40,
+    }}
+    showsVerticalScrollIndicator={false}>
+    <OptimizedImage
+      source={imageUrl}
+      priority="high"
+      style={[styles.productImage]}
+      useStyles={false}
+    />
+    <View style={styles.productInfoContainer}>
+      <Text
+        style={[
+          styles.title_h3,
+          {
+            textTransform: 'uppercase',
+            fontSize: dimensions.width * 0.02,
+            marginBottom: 10,
+            marginTop: 10,
+            fontFamily: font_type.bold,
+          },
+        ]}>
+        {productName}
+      </Text>
+      {productDescription}
+      <Text style={styles.priceTag}>
+        {fromText}
+        {Utils.formatCurrency(product.full_price, product.currency)}
+      </Text>
+
+      <TakeAwaySwitch
+        isTakeAway={isTakeAway}
+        onToggle={() => setIsTakeAway(prev => !prev)}
+        width={280}
+        disabled={isAddingToCart}
+      />
+
+      <ProductQuantityPicker
+        quantity={quantity}
+        setQuantity={setQuantity}
+        small={true}
+        home={true}
+        disabled={isAddingToCart}
+      />
+    </View>
+  </ScrollView>
+));
+
+const ProductDetailView = ({route, navigation}) => {
+  let {product, productData, productIndex, isRecomendation} = route.params;
+  const isUpdate = typeof productIndex === 'number';
+
+  // Selectores optimizados - solo lo que realmente necesitamos
+  const products = useSelector(state => state.store.products);
+  const language = useSelector(state => state.settings.language);
+
+  if (isUpdate || isRecomendation) {
+    product = products.find(p => p.sku === productData.sku);
+  }
+  const [quantity, setQuantity] = useState(
+    isUpdate ? productData.quantity || 1 : 1,
+  );
+
+  const [showAllModifiers, setShowAllModifiers] = useState({});
+  const [isAddingToCart, setIsAddingToCart] = useState(false);
+  const [isPickerActive, setIsPickerActive] = useState(false);
+  
+  // Estados para carga progresiva - UX mejorada
+  const [showCustomizations, setShowCustomizations] = useState(false);
+  
+  // Estados para category groups
+  const [selectedCategoryGroup, setSelectedCategoryGroup] = useState(null);
+  const [showCategoryGroups, setShowCategoryGroups] = useState(true);
+  const [categoryGroupSelections, setCategoryGroupSelections] = useState({});
+  const [categoryGroupSizes, setCategoryGroupSizes] = useState({});
+  const [expandedGroups, setExpandedGroups] = useState({});
+
+  const {commonStyles, colors, dimensions, font_type, sizes, withOpacity} =
+    useTheme();
+
+  // Memoización de computaciones costosas
+  const customizations = useMemo(() => {
+    // Si tiene category_groups y está habilitado, usar category_groups
+    if (product.has_category_groups && product.category_groups) {
+      // Si hay una categoría seleccionada, devolver sus customizations
+      if (selectedCategoryGroup) {
+        return selectedCategoryGroup.customizations || [];
+      }
+      // Si no hay categoría seleccionada, devolver array vacío
+      return [];
+    }
+    // Usar la lógica original
+    const result =
+      product.section?.customizations || product.customizations || [];
+    return result;
+  }, [product.section?.customizations, product.customizations, product.has_category_groups, product.category_groups, selectedCategoryGroup]);
+
+  // Memoizar recomendaciones para evitar recrearlas en cada render
+  const recomendations = useMemo(() => {
+    if (
+      !product.recommended_products ||
+      product.recommended_products.length === 0
+    ) {
+      return [];
+    }
+
+    return product.recommended_products.map(recommendedProduct => ({
+      id: recommendedProduct.id,
+      sku: recommendedProduct.sku,
+      name_es: recommendedProduct.name_es,
+      name_en: recommendedProduct.name_en,
+      image_path: recommendedProduct.image_path,
+      image_url: recommendedProduct.image_url,
+      price: recommendedProduct.price,
+      fullPrice: recommendedProduct.full_price,
+      taxRate: recommendedProduct.tax_rate,
+      section: recommendedProduct.section,
+      totalTaxes: 0,
+      currency: recommendedProduct.currency,
+      quantity: quantity,
+      customizations: [],
+      image: recommendedProduct.image,
+      totalLine: 0,
+    }));
+  }, [product.recommended_products, quantity]);
+
+  // Memoizar initialState
+  const initialState = useMemo(
+    () => ({
+      id: product.id,
+      sku: product.sku,
+      name_es: product.name_es,
+      name_en: product.name_en,
+      image_path: product.image_path,
+      image_url: product.image_url,
+      price: product.price,
+      fullPrice: product.full_price,
+      taxRate: product.tax_rate,
+      section: product.section,
+      totalTaxes: 0,
+      currency: product.currency,
+      quantity: quantity,
+      customizations: isUpdate ? productData.customizations : [],
+      image: product.image,
+      totalLine: 0,
+      recommended_products: recomendations,
+    }),
+    [
+      product.id,
+      product.sku,
+      product.name_es,
+      product.name_en,
+      product.image_path,
+      product.image_url,
+      product.price,
+      product.full_price,
+      product.tax_rate,
+      product.section,
+      product.currency,
+      product.image,
+      quantity,
+      isUpdate,
+      productData?.customizations,
+      recomendations,
+    ],
+  );
+
+  // Estilos optimizados con useMemo
+  const styles = useMemo(() => {
+    return createStyles({
+      commonStyles,
+      colors,
+      dimensions,
+      font_type,
+      sizes,
+      withOpacity,
+    });
+  }, [commonStyles, colors, dimensions, font_type, sizes, withOpacity]);
+
+  const productName = useMemo(() => {
+    if (language === 'en' && product.name_en) {
+      return product.name_en;
+    }
+    return product.name_es;
+  }, [language, product.name_en, product.name_es]);
+
+  const productDescriptionStr = useMemo(() => {
+    if (language === 'en' && product.description_en) {
+      return product.description_en;
+    }
+    return product.description_es;
+  }, [language, product.description_en, product.description_es]);
+
+  const imageUrl = useMemo(() => {
+    return product.image_url || 'https://placehold.co/950x950.png';
+  }, [product.image_url]);
+
+  const fromText = useMemo(() => {
+    const fromTextLocal = language === 'es' ? 'desde ' : 'from ';
+    // Si tiene category_groups, verificar si algún grupo tiene customizations
+    if (product.has_category_groups && product.category_groups) {
+      const hasCustomizations = product.category_groups.some(group => 
+        group.customizations && group.customizations.length > 0
+      );
+      return hasCustomizations ? fromTextLocal : '';
+    }
+    // Lógica original
+    return product.customizations && product.customizations.length > 0
+      ? fromTextLocal
+      : '';
+  }, [language, product.customizations, product.has_category_groups, product.category_groups]);
+  const [productSelected, setProductSelected] = useState(initialState);
+  const [modifiersSelected, setModifiersSelected] = useState([]);
+  const [sizeSelected, setSizeSelected] = useState(() => {
+    // Si tiene category_groups, inicialmente null hasta que se seleccione una categoría
+    if (product.has_category_groups && product.category_groups) {
+      return null;
+    }
+    // Lógica original
+    return customizations.length > 0 ? null : true;
+  });
+  const [totalProductBag, setTotalProductBag] = useState(0);
+  const currency = product.currency;
+  const dispatch = useDispatch();
+
+  const {t} = useTranslation();
+
+  // Efecto para carga progresiva - mostrar customizations después del render inicial
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowCustomizations(true);
+    }, 100); // Delay optimizado para UX fluida
+    
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    calculateProductTotal();
+  }, [modifiersSelected, quantity, sizeSelected]);
+
+  useEffect(() => {
+    setProductSelected({
+      ...productSelected,
+      customizations: modifiersSelected,
+    });
+  }, [modifiersSelected]);
+
+  useEffect(() => {
+    // Para productos con category groups, esperamos hasta que se seleccione una categoría
+    if (product.has_category_groups && product.category_groups && !selectedCategoryGroup && isUpdate) {
+      // Si es una actualización y tenemos category groups, buscar la categoría correcta basada en los datos guardados
+      if (productData?.customizations?.length > 0) {
+        // Buscar en qué category group están las customizations guardadas
+        const savedCustomization = productData.customizations[0];
+        const categoryGroup = product.category_groups.find(group => 
+          group.customizations?.some(customization => 
+            customization.customization_id === savedCustomization.codigo_modificador
+          )
+        );
+        if (categoryGroup) {
+          setSelectedCategoryGroup(categoryGroup);
+          setShowCategoryGroups(false);
+        }
+      }
+      return;
+    }
+    
+    if (customizations.length > 0) {
+      let hasSize = false;
+
+      customizations.forEach((customization, index) => {
+        const nameLower = customization.name_es?.toLowerCase() || '';
+        // Identificar si es un selector de tamaño
+        const isSize = nameLower.includes('tamaño');
+
+        if (isSize) {
+          const customizationSize = productData?.customizations?.find(
+            c => c.codigo_modificador === customization.customization_id,
+          );
+
+          if (customizationSize) {
+            // Buscar el tamaño usando múltiples estrategias
+            let size = customization.modifiers.find(
+              m =>
+                m.modifier_id === customizationSize.codigo_articulo.toString(),
+            );
+
+            // Si no se encuentra, intentar por descripción
+            if (!size) {
+              size = customization.modifiers.find(m => {
+                const modifierName = m.name_es?.toLowerCase() || '';
+                const savedName =
+                  customizationSize.descripcion?.toLowerCase() || '';
+                return (
+                  modifierName === savedName ||
+                  modifierName.includes(savedName.replace('+', '').trim()) ||
+                  savedName.includes(modifierName.replace('+', '').trim())
+                );
+              });
+            }
+
+            // Si aún no se encuentra, intentar por ID numérico
+            if (!size) {
+              size = customization.modifiers.find(
+                m => m.id === parseInt(customizationSize.codigo_articulo, 10),
+              );
+            }
+
+            if (size) {
+              handleSizePress(
+                size,
+                customization.id,
+                customization.customization_id,
+              );
+            }
+          }
+
+          hasSize = true;
+        } else if (isUpdate && productData?.customizations?.length > 0) {
+          const customizationModifiers = productData.customizations.filter(
+            c => c.codigo_modificador === customization.customization_id,
+          );
+
+          customizationModifiers.forEach(modifierData => {
+            // Primero intentar buscar por modifier_id (como string)
+            let modifier = customization.modifiers.find(
+              m => m.modifier_id === modifierData.codigo_articulo.toString(),
+            );
+
+            // Si no se encuentra, intentar buscar por coincidencia de descripción
+            if (!modifier) {
+              modifier = customization.modifiers.find(m => {
+                const modifierName = m.name_es?.toLowerCase() || '';
+                const savedName = modifierData.descripcion?.toLowerCase() || '';
+                return (
+                  modifierName === savedName ||
+                  modifierName.includes(savedName.replace('+', '').trim()) ||
+                  savedName.includes(modifierName.replace('+', '').trim())
+                );
+              });
+            }
+
+            // Si aún no se encuentra, intentar por ID numérico
+            if (!modifier) {
+              modifier = customization.modifiers.find(
+                m => m.id === parseInt(modifierData.codigo_articulo, 10),
+              );
+            }
+
+            if (modifier) {
+              handleModifierPress(
+                modifier,
+                customization.id,
+                customization.customization_id,
+                customization.selection_type,
+              );
+              handleSetQuantityModifier(
+                modifierData.cantidad,
+                modifier,
+                customization.id,
+                customization.selection_type,
+              );
+            }
+          });
+        }
+      });
+
+      if (!hasSize) {
+        setSizeSelected(true);
+      }
+    }
+  }, [
+    customizations,
+    productData,
+    isUpdate,
+    handleSizePress,
+    handleModifierPress,
+    handleSetQuantityModifier,
+    product.has_category_groups,
+    product.category_groups,
+    selectedCategoryGroup,
+  ]);
+
+  const calculateProductTotal = useCallback(() => {
+    let total = product.price * quantity;
+    
+    // Para productos con category groups, incluir todas las selecciones
+    if (product.has_category_groups) {
+      const { allSelections } = getAllCategoryGroupSelections();
+      // Incluir también las selecciones actuales
+      const allModifiers = [...allSelections, ...modifiersSelected.filter(mod => 
+        !allSelections.some(existing => existing.id === mod.id)
+      )];
+      
+      allModifiers.forEach(modifier => {
+        total += modifier.precio * modifier.cantidad * quantity;
+      });
+    } else {
+      // Lógica original para productos sin category groups
+      modifiersSelected.forEach(modifier => {
+        total += modifier.precio * modifier.cantidad * quantity;
+      });
+    }
+
+    total += total * (product.tax_rate / 100);
+    setTotalProductBag(Utils.roundMoney(total));
+  }, [product.price, product.tax_rate, quantity, modifiersSelected, product.has_category_groups, getAllCategoryGroupSelections]);
+
+  const handleSizePress = useCallback(
+    (modifier, customizationId, customizationCustomId) => {
+      if (isAddingToCart) {
+        return; // Evitar cambios durante el loading
+      }
+
+      setSizeSelected(modifier);
+      setModifiersSelected(prevModifiers => {
+        const updatedModifiers = prevModifiers.filter(
+          item => item.customization_id !== customizationId,
+        );
+
+        return [
+          ...updatedModifiers,
+          {
+            id: modifier.id,
+            codigo_modificador: customizationCustomId,
+            codigo_articulo: modifier.modifier_id,
+            descripcion: modifier.name_es,
+            description: modifier.name_en,
+            precio: modifier.price,
+            cantidad: 1,
+            customization_id: customizationId,
+          },
+        ];
+      });
+    },
+    [language, isAddingToCart],
+  );
+
+  const validateModifiers = (
+    prevModifiers,
+    customizationId,
+    selection_type,
+    newModifier,
+  ) => {
+    const values = prevModifiers.filter(
+      m => m.customization_id === customizationId,
+    );
+    let sum = 0;
+    values.forEach(value => {
+      sum += value.cantidad;
+    });
+    const customization = customizations.find(c => c.id === customizationId);
+
+    if (selection_type === 'single') {
+      return true;
+    }
+
+    if (selection_type === 'multiple' && sum <= customization.max_selection) {
+      return true;
+    }
+
+    return false;
+  };
+
+  const handleModifierPress = useCallback(
+    (modifier, customizationId, customizationCustomId, selection_type) => {
+      if (isAddingToCart) {
+        return; // Evitar cambios durante el loading
+      }
+
+      setModifiersSelected(prevModifiers => {
+        const existingModifier = prevModifiers.find(
+          item => item.id === modifier.id,
+        );
+
+        if (existingModifier) {
+          return prevModifiers.filter(item => item.id !== modifier.id);
+        } else {
+          let modifierDescription = modifier.name_es;
+
+          if (language === 'en' && modifier.name_en) {
+            modifierDescription = modifier.name_en;
+          }
+
+          const newModifier = {
+            id: modifier.id,
+            codigo_modificador: customizationCustomId,
+            codigo_articulo: modifier.modifier_id,
+            descripcion: modifier.name_es,
+            description: modifierDescription,
+            precio: modifier.price,
+            cantidad: 1,
+            customization_id: customizationId,
+          };
+
+          const isValid = validateModifiers(
+            [...prevModifiers, newModifier],
+            customizationId,
+            selection_type,
+            newModifier,
+          );
+
+          if (!isValid) {
+            return prevModifiers;
+          }
+
+          if (selection_type === 'single') {
+            const filteredModifiers = prevModifiers.filter(
+              m => m.customization_id !== customizationId,
+            );
+            return [...filteredModifiers, newModifier];
+          }
+
+          return [...prevModifiers, newModifier];
+        }
+      });
+    },
+    [customizations, language, isAddingToCart, validateModifiers],
+  );
+
+  const handleSetQuantityModifier = useCallback(
+    (qty, modifier, customizationId, selection_type) => {
+      setModifiersSelected(prevModifiers => {
+        const existingModifierIndex = prevModifiers.findIndex(
+          item => item.id === modifier.id,
+        );
+
+        if (existingModifierIndex >= 0) {
+          const updatedModifiers = [...prevModifiers];
+          updatedModifiers[existingModifierIndex] = {
+            ...updatedModifiers[existingModifierIndex],
+            cantidad: qty,
+          };
+
+          if (qty === 0) {
+            return updatedModifiers.filter(item => item.id !== modifier.id);
+          } else {
+            const isValid = validateModifiers(
+              updatedModifiers,
+              customizationId,
+              selection_type,
+              updatedModifiers[existingModifierIndex],
+            );
+            if (!isValid) {
+              return prevModifiers; // return previous state if  valid
+            }
+            return updatedModifiers;
+          }
+        } else {
+          const newModifier = {...modifier, cantidad: qty};
+          const isValid = validateModifiers(
+            [...prevModifiers, newModifier],
+            customizationId,
+            selection_type,
+            newModifier,
+          );
+          if (!isValid) {
+            return prevModifiers; // return previous state if not valid
+          }
+          return [...prevModifiers, newModifier];
+        }
+      });
+    },
+    [validateModifiers],
+  );
+
+  const areAllRequiredSelectionsComplete = () => {
+    for (let customization of customizations) {
+      const selectedModifiers = modifiersSelected.filter(
+        modifier => modifier.customization_id === customization.id,
+      );
+
+      const totalQty = selectedModifiers.reduce(
+        (acc, modifier) => acc + modifier.cantidad,
+        0,
+      );
+
+      if (totalQty < customization.min_selection) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const validateSelections = () => {
+    for (let customization of customizations) {
+      const selectedModifiers = modifiersSelected.filter(
+        modifier => modifier.customization_id === customization.id,
+      );
+
+      const totalQty = selectedModifiers.reduce(
+        (acc, modifier) => acc + modifier.cantidad,
+        0,
+      );
+
+      if (
+        totalQty < customization.min_selection ||
+        totalQty > customization.max_selection
+      ) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const handleCategoryGroupToggle = useCallback((categoryGroup) => {
+    setExpandedGroups(prev => ({
+      ...prev,
+      [categoryGroup.id]: !prev[categoryGroup.id]
+    }));
+    
+    // Si se está expandiendo, configurar como categoría activa
+    if (!expandedGroups[categoryGroup.id]) {
+      setSelectedCategoryGroup(categoryGroup);
+      
+      // Restaurar selecciones guardadas para esta categoría
+      const savedSelections = categoryGroupSelections[categoryGroup.id] || [];
+      const savedSize = categoryGroupSizes[categoryGroup.id] || null;
+      
+      setModifiersSelected(savedSelections);
+      
+      // Establecer sizeSelected basado en selecciones guardadas o customizations disponibles
+      const hasCustomizations = categoryGroup.customizations && categoryGroup.customizations.length > 0;
+      if (savedSize !== null) {
+        setSizeSelected(savedSize);
+      } else {
+        setSizeSelected(hasCustomizations ? null : true);
+      }
+    } else {
+      // Si se está contrayendo, guardar selecciones actuales
+      if (selectedCategoryGroup && selectedCategoryGroup.id === categoryGroup.id) {
+        setCategoryGroupSelections(prev => ({
+          ...prev,
+          [categoryGroup.id]: [...modifiersSelected]
+        }));
+        setCategoryGroupSizes(prev => ({
+          ...prev,
+          [categoryGroup.id]: sizeSelected
+        }));
+        setModifiersSelected([]);
+        setSizeSelected(null);
+        setSelectedCategoryGroup(null);
+      }
+    }
+  }, [expandedGroups, categoryGroupSelections, categoryGroupSizes, selectedCategoryGroup, modifiersSelected, sizeSelected]);
+
+  // Función para guardar selecciones cuando se cambia de grupo
+  const saveCurrentSelections = useCallback(() => {
+    if (selectedCategoryGroup) {
+      setCategoryGroupSelections(prev => ({
+        ...prev,
+        [selectedCategoryGroup.id]: [...modifiersSelected]
+      }));
+      setCategoryGroupSizes(prev => ({
+        ...prev,
+        [selectedCategoryGroup.id]: sizeSelected
+      }));
+    }
+  }, [selectedCategoryGroup, modifiersSelected, sizeSelected]);
+
+  // Función para consolidar todas las selecciones de category groups
+  const getAllCategoryGroupSelections = useCallback(() => {
+    let allSelections = [];
+    let allSizes = [];
+    
+    // Incluir selecciones de la categoría actual si existe
+    if (selectedCategoryGroup && modifiersSelected.length > 0) {
+      allSelections = [...allSelections, ...modifiersSelected];
+    }
+    if (selectedCategoryGroup && sizeSelected && sizeSelected !== true) {
+      allSizes.push(sizeSelected);
+    }
+    
+    // Incluir selecciones guardadas de otras categorías
+    Object.keys(categoryGroupSelections).forEach(categoryId => {
+      // Evitar duplicar la categoría actual
+      if (!selectedCategoryGroup || categoryId !== selectedCategoryGroup.id.toString()) {
+        const selections = categoryGroupSelections[categoryId] || [];
+        allSelections = [...allSelections, ...selections];
+      }
+    });
+    
+    Object.keys(categoryGroupSizes).forEach(categoryId => {
+      // Evitar duplicar la categoría actual
+      if (!selectedCategoryGroup || categoryId !== selectedCategoryGroup.id.toString()) {
+        const size = categoryGroupSizes[categoryId];
+        if (size && size !== true) {
+          allSizes.push(size);
+        }
+      }
+    });
+    
+    return { allSelections, allSizes };
+  }, [selectedCategoryGroup, modifiersSelected, sizeSelected, categoryGroupSelections, categoryGroupSizes]);
+
+  const handleAddToCart = useCallback(() => {
+    if (!sizeSelected || isAddingToCart) {
+      return;
+    }
+
+    if (!validateSelections()) {
+      return;
+    }
+
+    // Guardar selecciones actuales antes de procesar
+    if (product.has_category_groups && selectedCategoryGroup) {
+      setCategoryGroupSelections(prev => ({
+        ...prev,
+        [selectedCategoryGroup.id]: [...modifiersSelected]
+      }));
+      setCategoryGroupSizes(prev => ({
+        ...prev,
+        [selectedCategoryGroup.id]: sizeSelected
+      }));
+    }
+
+    setIsAddingToCart(true);
+    
+    // Para productos con category groups, usar todas las selecciones consolidadas
+    let finalModifiersSelected = modifiersSelected;
+    if (product.has_category_groups) {
+      const { allSelections } = getAllCategoryGroupSelections();
+      // Incluir también las selecciones actuales si no están guardadas aún
+      if (selectedCategoryGroup) {
+        const currentSelections = modifiersSelected.filter(mod => 
+          !allSelections.some(existing => existing.id === mod.id)
+        );
+        finalModifiersSelected = [...allSelections, ...currentSelections];
+      } else {
+        finalModifiersSelected = allSelections;
+      }
+    }
+
+    // helpers (fuera del componente)
+    const slimCustomizations = (mods = []) =>
+      mods.map(m => ({
+        codigo_modificador: m.codigo_modificador, // Mantener el valor original
+        codigo_articulo: m.codigo_articulo,
+        descripcion: m.descripcion,
+        description: m.description,
+        precio: m.precio,
+        cantidad: m.cantidad,
+        modifier_id: m.codigo_articulo,
+      }));
+
+    // podés limitar a 3–5 para no inflar el state si vienen muchas
+    const slimRecommendations = (arr = []) =>
+      arr.slice(0, 3).map(r => ({
+        sku: r.sku,
+        name_es: r.name_es,
+        name_en: r.name_en,
+        image_url: r.image_url ?? null,
+        price: r.price,
+        currency: r.currency,
+      }));
+
+    // arma la línea slim
+    const buildSlimLine = (base, qty, total, mods, recs) => ({
+      // UI (BagView)
+      sku: base.sku,
+      name_es: base.name_es,
+      name_en: base.name_en,
+      image_url: base.image_url ?? null,
+      price: base.price,
+      taxRate: base.tax_rate ?? base.taxRate ?? 0, // BagView usa taxRate
+      currency: base.currency,
+      quantity: qty,
+      totalLine: total,
+
+      // Order API + UI
+      customizations: slimCustomizations(mods),
+
+      // Recomendados por ítem (sólo lo que necesitas)
+      recommended_products: slimRecommendations(recs),
+
+      // Nuevo: para llevar
+      isTakeAway: isTakeAway === true,
+    });
+
+    const productToAdd = buildSlimLine(
+      product,
+      quantity,
+      totalProductBag,
+      finalModifiersSelected,
+      product.recommended_products || [],
+    );
+
+    // Usar requestAnimationFrame para diferir operaciones y mejorar UX
+    requestAnimationFrame(() => {
+      try {
+        if (isUpdate) {
+          console.log('🔄 ACTUALIZANDO producto existente en Redux');
+          console.log(
+            'Producto que se actualizará:',
+            JSON.stringify(productToAdd, null, 2),
+          );
+
+          dispatch(
+            updateProductByIndex({index: productIndex, product: productToAdd}),
+          );
+        } else {
+          console.log('➕ AGREGANDO nuevo producto a Redux');
+          console.log(
+            'Producto que se agregará:',
+            JSON.stringify(productToAdd, null, 2),
+          );
+
+          dispatch(addProduct(productToAdd));
+        }
+
+        // Navegar después de un pequeño delay para mostrar el loader
+        setTimeout(() => {
+          // Resetear estados después de la navegación exitosa
+          setQuantity(1);
+          setModifiersSelected([]);
+          setProductSelected(initialState);
+          setSizeSelected(null);
+          setIsAddingToCart(false);
+
+          navigation.replace('Index', {goToBag: true});
+        }, 300); // Delay reducido pero mantenido para UX
+      } catch (error) {
+        console.error('Error adding product to cart:', error);
+        setIsAddingToCart(false);
+      }
+    });
+  }, [
+    sizeSelected,
+    isAddingToCart,
+    validateSelections,
+    productSelected,
+    modifiersSelected,
+    totalProductBag,
+    quantity,
+    isUpdate,
+    dispatch,
+    productIndex,
+    initialState,
+    navigation,
+    isTakeAway,
+  ]);
+
+  // Función para verificar si una categoría tiene selecciones
+  const categoryHasSelections = useCallback((categoryGroupId) => {
+    const selections = categoryGroupSelections[categoryGroupId] || [];
+    const hasSize = categoryGroupSizes[categoryGroupId];
+    return selections.length > 0 || (hasSize && hasSize !== true);
+  }, [categoryGroupSelections, categoryGroupSizes]);
+
+  // Función para contar selecciones en una categoría
+  const getCategorySelectionCount = useCallback((categoryGroupId) => {
+    const selections = categoryGroupSelections[categoryGroupId] || [];
+    const hasSize = categoryGroupSizes[categoryGroupId];
+    let count = selections.length;
+    if (hasSize && hasSize !== true) {
+      count += 1; // Contar el tamaño como una selección adicional
+    }
+    return count;
+  }, [categoryGroupSelections, categoryGroupSizes]);
+
+  const renderCategoryGroups = () => {
+    if (!product.has_category_groups || !product.category_groups) {
+      return null;
+    }
+
+    return (
+      <View style={styles.categoryGroupsContainer}>
+        <Text style={styles.categoryGroupsTitle}>
+          {t('select_section')}
+        </Text>
+        {product.category_groups.map((categoryGroup) => {
+          const groupName = language === 'en' && categoryGroup.name_en
+            ? categoryGroup.name_en
+            : categoryGroup.name;
+          
+          const hasSelections = categoryHasSelections(categoryGroup.id);
+          const selectionCount = getCategorySelectionCount(categoryGroup.id);
+          const isExpanded = expandedGroups[categoryGroup.id];
+          const isActiveGroup = selectedCategoryGroup && selectedCategoryGroup.id === categoryGroup.id;
+          
+          return (
+            <View key={categoryGroup.id} style={styles.accordionContainer}>
+              {/* Header del acordeón */}
+              <TouchableOpacity
+                style={styles.categoryGroupItem}
+                onPress={() => handleCategoryGroupToggle(categoryGroup)}
+              >
+                <View style={styles.categoryGroupContent}>
+                  <View style={styles.categoryGroupNameContainer}>
+                    <View style={styles.categoryGroupTitleContainer}>
+                      <Text style={styles.categoryGroupName}>{groupName}</Text>
+                      {hasSelections && (
+                        <View style={styles.selectionIndicator}>
+                          <Text style={styles.selectionIndicatorText}>{selectionCount}</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                  {categoryGroup.customizations_count > 0 && (
+                    <Text style={styles.categoryGroupCount}>
+                      {categoryGroup.customizations_count} {language === 'es' ? 'opciones' : 'options'}
+                    </Text>
+                  )}
+                </View>
+                <Text style={[
+                  styles.categoryGroupArrow,
+                  isExpanded && styles.categoryGroupArrowExpanded
+                ]}>
+                  {isExpanded ? '↓' : '→'}
+                </Text>
+              </TouchableOpacity>
+              
+              {/* Contenido expandible del acordeón */}
+              {isExpanded && isActiveGroup && (
+                <View style={styles.accordionContent}>
+                  {customizations.map((customization, index) => (
+                    <View key={customization.id} style={styles.customizationSection}>
+                      <View>
+                        <View>
+                          <View
+                            style={{
+                              flexDirection: 'row',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              marginRight: 30,
+                            }}>
+                            <Text style={styles.customizationTitle}>
+                              {language === 'es'
+                                ? customization.name_es
+                                : customization.name_es === null
+                                ? customization.name_en
+                                : customization.name_en}
+                            </Text>
+                            {customization.min_selection > 0 && (
+                              <View style={styles.requiredBadge}>
+                                <Text style={styles.requiredBadgeText}>
+                                  {t('required')}
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                          <Text style={[styles.customizationSubtitle]}>
+                            {t('select_max')} {customization.max_selection}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={styles.modifiersContainer}>
+                        {renderModifiers(customization, index)}
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
+
+  const renderModifiers = (customization, index) => {
+    const MAX_MODIFIERS = 8;
+    const showAll = showAllModifiers[customization.id] || false;
+    const modifiersToShow = showAll
+      ? customization.modifiers
+      : customization.modifiers.slice(0, MAX_MODIFIERS);
+    const hasMoreModifiers = customization.modifiers.length > MAX_MODIFIERS;
+
+    const toggleShowAll = () => {
+      setShowAllModifiers(prev => ({
+        ...prev,
+        [customization.id]: !prev[customization.id],
+      }));
+    };
+
+    if (customization.name_es.toLowerCase().includes('tamaño')) {
+      const icons = {
+        en: {
+          lcup: require('../../assets/images/lcup.png'),
+          mcup: require('../../assets/images/mcup.png'),
+          scup: require('../../assets/images/scup.png'),
+        },
+        es: {
+          lcup: require('../../assets/images/lcup_es.png'),
+          mcup: require('../../assets/images/mcup_es.png'),
+          scup: require('../../assets/images/scup_es.png'),
+        },
+      };
+
+      const sizeModifiers = modifiersToShow.map((modifier, modifierIndex) => {
+        const isSelected =
+          sizeSelected && sizeSelected.id === modifier.id
+            ? styles.modifierItemSelected
+            : '';
+
+        let modifierName = modifier.name_es;
+
+        if (language === 'en' && modifier.name_en) {
+          modifierName = modifier.name_en;
+        }
+
+        let style = {height: 100};
+        let heightBtn = {paddingVertical: 12};
+        let icon = icons.lcup;
+
+        if (
+          modifier.name_es.toLowerCase().includes('(p)') ||
+          modifier.name_es.toLowerCase().includes('pequeño')
+        ) {
+          icon = icons[language].scup;
+          style = {height: 60};
+          heightBtn = {paddingVertical: 7};
+        } else if (
+          modifier.name_es.toLowerCase().includes('(m)') ||
+          modifier.name_es.toLowerCase().includes('mediano')
+        ) {
+          icon = icons[language].mcup;
+          style = {height: 80};
+          heightBtn = {paddingVertical: 9};
+        } else {
+          icon = icons[language].lcup;
+          style = {height: 100};
+          heightBtn = {paddingVertical: 12};
+        }
+
+        return (
+          <TouchableWithoutFeedback
+            key={modifier.id}
+            onPress={() =>
+              handleSizePress(
+                modifier,
+                customization.id,
+                customization.customization_id,
+              )
+            }>
+            <View style={[styles.modifierItem2, isSelected]}>
+              <View>
+                <Image source={icon} style={[styles.productImage, style]} />
+              </View>
+              <View style={{width: '100%'}}>
+                <Text
+                  style={[
+                    styles.modifierPrice,
+                    {fontSize: dimensions.width * 0.012},
+                    sizeSelected &&
+                      sizeSelected.id === modifier.id && {color: colors.white},
+                  ]}>
+                  +{' '}
+                  {Utils.formatCurrency(
+                    calculateFullPrice(modifier.price),
+                    currency,
+                  )}
+                </Text>
+                <Text
+                  style={[
+                    styles.modifierTitleBtn,
+                    heightBtn,
+                    sizeSelected &&
+                      sizeSelected.id === modifier.id && {color: colors.white},
+                  ]}>
+                  {modifierName}
+                </Text>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        );
+      });
+
+      return (
+        <>
+          {sizeModifiers}
+          {hasMoreModifiers && (
+            <TouchableOpacity
+              style={styles.showMoreButton}
+              onPress={toggleShowAll}>
+              <Text style={styles.showMoreButtonText}>
+                {showAll ? t('show_less') : t('show_more')}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </>
+      );
+    } else {
+      const regularModifiers = modifiersToShow.map(modifier => {
+        const selectedModifier = modifiersSelected.find(
+          item => item.id === modifier.id,
+        );
+        const isSelected = selectedModifier ? styles.modifierItemSelected : '';
+
+        let modifierName = modifier.name_es;
+
+        if (language === 'en' && modifier.name_en) {
+          modifierName = modifier.name_en;
+        }
+
+        let modifierImageTag = null;
+
+        if (modifier.image) {
+          const modifierImageUrl = modifier.image;
+          modifierImageTag = (
+            <Image
+              style={{width: '100%', height: 75, objectFit: 'contain'}}
+              source={{uri: modifierImageUrl}}
+            />
+          );
+        }
+
+        return (
+          <TouchableWithoutFeedback
+            key={modifier.id}
+            onPress={() => {
+              if (!isPickerActive) {
+                handleModifierPress(
+                  modifier,
+                  customization.id,
+                  customization.customization_id,
+                  customization.selection_type,
+                );
+              }
+            }}>
+            <View
+              style={[
+                styles.modifierItem,
+                isSelected,
+                {justifyContent: 'center'},
+              ]}>
+              {modifierImageTag}
+              <Text
+                style={[
+                  styles.modifierTitle,
+                  selectedModifier && {color: colors.white, marginTop: 8},
+                ]}>
+                {modifierName}
+              </Text>
+              <Text
+                style={[
+                  styles.modifierPrice,
+                  {fontSize: dimensions.width * 0.012},
+                  selectedModifier && {color: colors.white},
+                ]}>
+                +{' '}
+                {Utils.formatCurrency(
+                  calculateFullPrice(modifier.price),
+                  currency,
+                )}
+              </Text>
+              {customization.selection_type === 'multiple' &&
+                selectedModifier && (
+                  <TouchableWithoutFeedback
+                    onPressIn={() => setIsPickerActive(true)}
+                    onPressOut={() => setIsPickerActive(false)}>
+                    <View style={styles.container2}>
+                      <ModifierQuantityPicker
+                        quantity={selectedModifier.cantidad}
+                        setQuantity={handleSetQuantityModifier}
+                        modifier={modifier}
+                        customization_id={customization.id}
+                        customization_selection_type={
+                          customization.selection_type
+                        }
+                      />
+                    </View>
+                  </TouchableWithoutFeedback>
+                )}
+            </View>
+          </TouchableWithoutFeedback>
+        );
+      });
+
+      return (
+        <>
+          {regularModifiers}
+          {hasMoreModifiers && (
+            <TouchableOpacity
+              style={styles.showMoreButton}
+              onPress={toggleShowAll}>
+              <Text style={styles.showMoreButtonText}>
+                {showAll ? t('show_less') : t('show_more')}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </>
+      );
+    }
+  };
+
+  const calculateFullPrice = price => {
+    return price + price * (product.tax_rate / 100);
+  };
+
+  const isScrollable = customizations.length > 0 || (product.has_category_groups && product.category_groups && product.category_groups.length > 0);
+
+  let productDescription = null;
+
+  if (productDescriptionStr) {
+    productDescription = (
+      <Text style={styles.productDescription}>{productDescriptionStr}</Text>
+    );
+  }
+
+  let customizationsTag = null;
+
+  // Si tiene category_groups, mostrar el acordeón
+  if (product.has_category_groups && product.category_groups) {
+    customizationsTag = (
+      <View style={{width: '50%', position: 'relative'}}>
+        <ScrollView contentContainerStyle={[styles.scrollViewContainer]}>
+          <View style={[styles.scrollViewContainer, styles.fullHeight]}>
+            {renderCategoryGroups()}
+          </View>
+        </ScrollView>
+        {/* Overlay para deshabilitar interacciones durante el loading */}
+        {isAddingToCart && (
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(255, 255, 255, 0.7)',
+              zIndex: 1000,
+            }}
+          />
+        )}
+      </View>
+    );
+  } else if (customizations.length > 0) {
+    // Lógica original para productos sin category_groups
+    if (!showCustomizations) {
+        // Skeleton loading mientras cargan las customizations
+        customizationsTag = (
+          <View style={{width: '50%', position: 'relative'}}>
+            <ScrollView contentContainerStyle={[styles.scrollViewContainer]}>
+              <View style={[styles.scrollViewContainer, styles.fullHeight]}>
+                {[1, 2].map((item) => (
+                  <View key={item} style={styles.customizationSection}>
+                    <View style={{
+                      height: 24, 
+                      backgroundColor: colors.lightGray || '#f0f0f0', 
+                      borderRadius: 4,
+                      marginBottom: 15,
+                      width: '70%'
+                    }} />
+                    <View style={{
+                      height: 16, 
+                      backgroundColor: colors.lightGray || '#f5f5f5', 
+                      borderRadius: 4,
+                      marginBottom: 20,
+                      width: '50%'
+                    }} />
+                    {[1, 2, 3].map((mod) => (
+                      <View key={mod} style={{
+                        height: 60,
+                        backgroundColor: colors.lightGray || '#f8f8f8',
+                        borderRadius: 8,
+                        marginBottom: 12,
+                        padding: 15,
+                        flexDirection: 'row',
+                        alignItems: 'center'
+                      }}>
+                        <View style={{
+                          width: 40, 
+                          height: 40, 
+                          backgroundColor: colors.gray || '#e0e0e0', 
+                          borderRadius: 20, 
+                          marginRight: 15
+                        }} />
+                        <View style={{flex: 1}}>
+                          <View style={{
+                            height: 14, 
+                            backgroundColor: colors.gray || '#e8e8e8', 
+                            borderRadius: 4, 
+                            marginBottom: 6
+                          }} />
+                          <View style={{
+                            height: 12, 
+                            backgroundColor: colors.lightGray || '#f0f0f0', 
+                            borderRadius: 4, 
+                            width: '60%'
+                          }} />
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
+          </View>
+        );
+      } else {
+        const groupName = language === 'en' && selectedCategoryGroup.name_en 
+          ? selectedCategoryGroup.name_en 
+          : selectedCategoryGroup.name;
+        
+        customizationsTag = (
+          <View
+            style={{
+              width: '50%',
+              position: 'relative',
+            }}>
+            {/* Header con botón de regreso */}
+            <View style={styles.categoryGroupHeader}>
+              <TouchableOpacity 
+                style={styles.backToCategoryButton}
+                onPress={handleBackToCategoryGroups}
+              >
+                <Text style={styles.backToCategoryButtonText}>← {t('back')}</Text>
+              </TouchableOpacity>
+              <Text style={styles.selectedCategoryTitle}>{groupName}</Text>
+            </View>
+            
+            <ScrollView contentContainerStyle={[styles.scrollViewContainer]}>
+              <View
+                style={[
+                  styles.scrollViewContainer,
+                  !isScrollable && styles.fullHeight,
+                ]}>
+                {customizations.map((customization, index) => (
+                <View key={customization.id} style={styles.customizationSection}>
+                  <View>
+                    <View>
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginRight: 30,
+                        }}>
+                        <Text style={styles.customizationTitle}>
+                          {language === 'es'
+                            ? customization.name_es
+                            : customization.name_es === null
+                            ? customization.name_en
+                            : customization.name_en}
+                        </Text>
+                        {customization.min_selection > 0 && (
+                          <View style={styles.requiredBadge}>
+                            <Text style={styles.requiredBadgeText}>
+                              {t('required')}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[styles.customizationSubtitle]}>
+                        {t('select_max')} {customization.max_selection}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.modifiersContainer}>
+                    {renderModifiers(customization, index)}
+                  </View>
+                </View>
+              ))}
+            </View>
+          </ScrollView>
+          {/* Overlay para deshabilitar interacciones durante el loading */}
+          {isAddingToCart && (
+            <View
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: 'rgba(255, 255, 255, 0.7)',
+                zIndex: 1000,
+              }}
+            />
+          )}
+        </View>
+      );
+  }
+
+  const wrapText = (text, maxWordsPerLine) => {
+    const words = text.split(' ');
+    const lines = [];
+    for (let i = 0; i < words.length; i += maxWordsPerLine) {
+      lines.push(words.slice(i, i + maxWordsPerLine).join(' '));
+    }
+    return lines.join('\n');
+  };
+
+  // Estado para saber si es para llevar
+  const [isTakeAway, setIsTakeAway] = useState(
+    isUpdate ? productData?.isTakeAway || false : false,
+  );
+
+  return (
+    <View style={{backgroundColor: '#FFF', flex: 1}}>
+      <View style={{flex: 1, flexDirection: 'row', justifyContent: 'center'}}>
+        <View
+          style={{
+            width: '50%',
+            position: 'relative',
+          }}>
+          <ProductBasicInfo
+            imageUrl={imageUrl}
+            productName={wrapText(productName, 4)}
+            productDescription={productDescription}
+            product={product}
+            fromText={fromText}
+            isTakeAway={isTakeAway}
+            setIsTakeAway={setIsTakeAway}
+            quantity={quantity}
+            setQuantity={setQuantity}
+            isAddingToCart={isAddingToCart}
+            styles={styles}
+            colors={colors}
+            font_type={font_type}
+            dimensions={dimensions}
+          />
+          {/* Overlay para deshabilitar interacciones durante el loading */}
+          {isAddingToCart && <View style={styles.loadingOverlay} />}
+        </View>
+        {customizationsTag}
+      </View>
+      <View style={styles.actionContainer}>
+        {/* Centro: Botones */}
+        <View style={styles.centerButtonContainer}>
+          <View style={styles.buttonRow}>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => {
+                // Si estamos en una categoría seleccionada, regresar a la lista de categorías
+                if (product.has_category_groups && selectedCategoryGroup && !showCategoryGroups) {
+                  handleBackToCategoryGroups();
+                } else {
+                  // Lógica original
+                  if (isUpdate) {
+                    navigation.replace('Index', {goToBag: true});
+                  } else {
+                    navigation.goBack();
+                  }
+                }
+              }}>
+              <Text
+                style={[
+                  styles.secondaryButtonText,
+                  styles.buttonTextUppercase,
+                ]}>
+                {t('back')}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.primaryButton,
+                (!sizeSelected ||
+                  !areAllRequiredSelectionsComplete() ||
+                  isAddingToCart ||
+                  (product.has_category_groups && showCategoryGroups && !selectedCategoryGroup)) &&
+                  styles.buttonDisabled,
+              ]}
+              onPress={handleAddToCart}
+              disabled={
+                !sizeSelected ||
+                !areAllRequiredSelectionsComplete() ||
+                isAddingToCart ||
+                (product.has_category_groups && showCategoryGroups && !selectedCategoryGroup)
+              }>
+              {isAddingToCart ? (
+                <View style={styles.loadingButtonContent}>
+                  <ActivityIndicator size="small" color={colors.background} />
+                  <Text
+                    style={[
+                      styles.primaryButtonText,
+                      styles.buttonTextUppercase,
+                    ]}>
+                    {t('processing')}
+                  </Text>
+                </View>
+              ) : (
+                <Text
+                  style={[
+                    styles.primaryButtonText,
+                    styles.buttonTextUppercase,
+                  ]}>
+                  {t('add_item')}
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Derecha: Total */}
+        <View style={styles.totalPriceContainer}>
+          {/* Barrita vertical */}
+          <View style={styles.verticalDivider} />
+          {/* Texto Total */}
+          <Text style={styles.totalText}>
+            Total {Utils.formatCurrency(totalProductBag, product.currency)}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+};
+
+export default React.memo(ProductDetailView);
